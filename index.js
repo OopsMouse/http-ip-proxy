@@ -6,7 +6,7 @@ function printError(err) {
 }
 
 var proxy = ipProxy.createServer(config.options);
-ipProxy.on('error', printError);
-ipProxy.listen(config.port, function () {
+proxy.on('error', printError);
+proxy.listen(config.port, function () {
   console.log('Starting...');
 });
