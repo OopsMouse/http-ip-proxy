@@ -1,5 +1,13 @@
 {
-  "targets": {
-    "127.0.0.1": "http://localhost:8080"
-  }
+  "options": {
+    "ssl": {
+      "key": "./test/key.pem",
+      "cert": "./test/cert.pem"
+    },
+    "targets": {
+      "127.0.0.1": "http://localhost:80",
+      "other": "https://localhost:4443"
+    }
+  },
+  "port": "443"
 }
