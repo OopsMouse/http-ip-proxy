@@ -1,6 +1,6 @@
-'use strict';
-
 var ipProxy = require('../lib/ip-proxy')
+  , fs      = require('fs')
+  , path    = require('path')
   , http    = require('http')
   , should  = require('should')
   , request = require('request');
@@ -8,6 +8,11 @@ var ipProxy = require('../lib/ip-proxy')
 // Becasue this test use Self-Signed Certificate,
 // env NODE_TLS_REJECT_UNAUTHORIZED must be set 0
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+var httpsServerOpts = {
+  key: fs.readFileSync(path.join(__dirname, 'key.pem')),
+  cert: fs.readFileSync(path.join(__dirname, 'cert.pem'))
+};
 
 describe('ip proxy', function () {
 
@@ -29,121 +34,61 @@ describe('ip proxy', function () {
 
   describe('#listen', function () {
 
+    var proxyPort = 5555;
+
     it('should be a success to listen by specifying the port', function (done) {
       var proxy = ipProxy.createServer();
-      proxy.listen(5555, function () {
-        (5555).should.be.exactly(proxy.address().port);
+      proxy.listen(proxyPort, function () {
+        proxyPort.should.be.exactly(proxy.address().port);
         proxy.close();
         done();
       });
     });
 
-    it('should be a success to access via host', function (done) {
-      var port  = 3000;
-      var proxy = ipProxy.createServer({ targets: { '127.0.0.1': 'http://localhost:' + port } });
-      proxy.listen(5555);
+    var server1 = { body: 'server1', port: 3333, self: null, url: 'http://127.0.0.1:3333' }
+      , server2 = { body: 'server2', port: 4444, self: null, url: 'http://127.0.0.1:4444' };
 
-      var server = http.createServer(function(req, res) {
-        res.end('ok');
-      }).listen(port);
-
-      request('http://localhost:5555', function (err, res, body) {
-        if (err) {
-          assert.fail;
-        }
-
-        body.should.be.equal('ok');
-        done();
-      });
+    beforeEach(function () {
+      server1.self = http.createServer(function(req, res) {
+        res.end(server1.body);
+      }).listen(server1.port);
+      server2.self = http.createServer(function(req, res) {
+        res.end(server2.body);
+      }).listen(server2.port);
     });
 
+    afterEach(function() {
+      server1.self.close();
+      server2.self.close();
+    })
+
+    var tests = [
+      { args : { targets: {} }, expected: { status: 400, body: '' } },
+      { args : { targets: { '127.0.0.1': server1.url } }, expected: { status: 200, body: server1.body } },
+      { args : { targets: { '127.0.0.1': server1.url, other: server2.url } }, expected: { status: 200, body: server1.body } },
+      { args : { targets: { '127.0.0.1': server2.url, other: server1.url } }, expected: { status: 200, body: server2.body } },
+      { args : { targets: { other: server1.url } }, expected: { status: 200, body: server1.body }  },
+      { args : { ssl: httpsServerOpts, targets: {} }, expected: { status: 400, body: '' } },
+      { args : { ssl: httpsServerOpts, targets: { '127.0.0.1': server1.url } }, expected: { status: 200, body: server1.body } },
+      { args : { ssl: httpsServerOpts, targets: { '127.0.0.1': server1.url, other: server2.url } }, expected: { status: 200, body: server1.body } },
+      { args : { ssl: httpsServerOpts, targets: { '127.0.0.1': server2.url, other: server1.url } }, expected: { status: 200, body: server2.body } },
+      { args : { ssl: httpsServerOpts, targets: { other: server1.url } }, expected: { status: 200, body: server1.body }  },
+    ];
+
+    tests.forEach(function (test) {
+      var protocol = ((typeof test.args.ssl !== 'undefined') ? 'https' : 'http');
+      it('should be a success to access via proxy to host with ' + protocol, function (done) {
+        var proxy = ipProxy.createServer(test.args);
+        proxy.listen(proxyPort);
+
+        request(protocol + '://localhost:' + proxyPort, function (err, res, body) {
+          res.statusCode.should.be.equal(test.expected.status);
+          res.body.should.be.equal(test.expected.body);
+          proxy.close();
+          done();
+        });
+      });
+    });
   });
-
-  //   var tests = [
-  //     { args: { protocol: 'http', isWhite: false }, expected: { throughs: [ 'downstream' ] } },
-  //     { args: { protocol: 'http', isWhite: true }, expected: { throughs: [ 'downstream', 'upstream' ] } },
-  //     { args: { protocol: 'https', isWhite: false }, expected: { throughs: [ 'downstream' ] } },
-  //     { args: { protocol: 'https', isWhite: true }, expected: { throughs: [ 'downstream', 'upstream' ] } }
-  //   ];
-
-  //   tests.forEach(function (test) {
-
-  //     var actualThroughs = [];
-
-  //     var server, downstream, upstream;
-  //     var isHttps = (test.args.protocol === 'https');
-
-  //     beforeEach(function startServer(done) {
-  //       if (isHttps) {
-  //         server = https.createServer(httpsServerOpts);
-  //       } else {
-  //         server = http.createServer();
-  //       }
-
-  //       server.on('request', function (req, res) {
-  //         res.end();
-  //       }).listen(function () {
-  //         done();
-  //       });
-  //     });
-
-  //     beforeEach(function startUpStreamProxy(done) {
-  //       upstream = (new Proxy()).on('connect', function () {
-  //         actualThroughs.push('upstream');
-  //       }).listen(function () {
-  //         done();
-  //       });
-  //     });
-
-  //     beforeEach(function startDownStreamProxy(done) {
-  //       downstream = (new Proxy({
-  //         proxyHost: 'localhost',
-  //         proxyPort: upstream.address().port,
-  //         whiteHosts: test.args.isWhite ? [ 'localhost' ] : []
-  //       })).on('connect', function () {
-  //         actualThroughs.push('downstream');
-  //       }).listen(function () {
-  //         done();
-  //       });
-  //     });
-
-  //     it('should be a success to access via ' + (isHttps ? 'https' : 'http') + ' to the host, which ' + (test.args.isWhite ? 'is' : 'isn\'t') + ' a white host', function (done) {
-
-  //       var uri = (isHttps ? 'https' : 'http') + '://localhost:' + server.address().port;
-  //       request({
-  //         uri: uri,
-  //         proxy: 'http://localhost:' + downstream.address().port
-  //       }, function (err, res) {
-  //         (err === null).should.be.true;
-  //         (200).should.be.exactly(res.statusCode);
-  //         test.expected.throughs.should.eql(actualThroughs);
-  //         done();
-  //       });
-  //     });
-
-  //     afterEach(function () {
-  //       server.close();
-  //       downstream.close();
-  //       upstream.close();
-  //     });
-  //   });
-
-  //   it('should cause a error', function (done) {
-  //     var server = https.createServer(httpsServerOpts).listen();
-
-  //     var proxy = new Proxy()
-  //     .on('connect', function () {
-  //       server.close();
-  //       proxy.close();
-  //     }).on('error', function (err) {
-  //       err.should.not.be.null;
-  //       done();
-  //     }).listen(function () {
-  //       request({
-  //         uri: 'https://localhost:' + server.address().port,
-  //         proxy: 'http://localhost:' + proxy.address().port
-  //       }, function () {});
-  //     });
-  //   });
 
 });
